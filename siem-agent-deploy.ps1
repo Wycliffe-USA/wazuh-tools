@@ -1,5 +1,7 @@
 #
 # siem-agent-deploy.ps1
+# Version 10 
+# last material change 11/8/2023
 #
 # This script is for checking and/or installing the Wazuh agent on Windows systems.  It can directly install or uninstall it, conditionally 
 # install it, or simply check to see if installation/reinstallation is needed.  The Wazuh agent for Windows presently includes Wazuh agent 
@@ -75,6 +77,7 @@
 #
 
 # All possible parameters that may be specified for check-only, conditional install, forced install or forced uninstall purposes.
+
 param ( $Mgr,
 	$RegMgr,
 	$RegPass,	
@@ -82,7 +85,7 @@ param ( $Mgr,
 	$AgentName = $env:computername, 
 	$ExtraGroups, 
 	$global:VerDiscAddr,
-	$global:InstallVer,
+	$InstallVer,
 	$global:DefaultInstallVer = "4.3.9",
 	$DownloadSource,
 	[switch]$SkipSysmon=$false, 
@@ -222,6 +225,10 @@ If ([Environment]::Is64BitOperatingSystem) {
 # If Wazuh agent conf.d directory is not yet present, then create it and populate it with a 000-base.conf copied from current ossec.conf file.
 if ( -not (Test-Path -LiteralPath "$PFPATH\ossec-agent\conf.d" -PathType Container ) ) {
     New-Item -ItemType "directory" -Path "$PFPATH\ossec-agent\conf.d" | out-null
+    while ( -not ( Test-Path "$PFPATH\ossec-agent\conf.d" -PathType Container ) ) {
+	sleep 1
+ 	Write-Output "directory missing, pausing..."
+    }
     Copy-Item "$PFPATH\ossec-agent\ossec.conf" "$PFPATH\ossec-agent\conf.d\000-base.conf"
     # If the newly generated 000-base.conf (from old ossec.conf) is missing the merge-wazuh-conf command section, then append it now.
     $baseFile = Get-Content "$PFPATH/ossec-agent/conf.d/000-base.conf" -erroraction 'silentlycontinue'
@@ -286,6 +293,10 @@ if ($hash1 -eq $hash2) {
 }
 '@
 New-Item -ItemType "directory" -Path "$PFPATH\ossec-agent\scripts" -erroraction 'silentlycontinue' | out-null
+while ( -not ( Test-Path "$PFPATH\ossec-agent\scripts" -PathType Container ) ) {
+   sleep 1
+   Write-Output "directory missing, pausing..."
+}
 $ScriptToWrite | Out-File -FilePath "$PFPATH\ossec-agent\scripts\merge-wazuh-conf.ps1" -Encoding "UTF8"
 }
 
@@ -573,11 +584,11 @@ function installAgent {
 	if ( ($Install) -or ( -not ($Connected) ) ) {
 		# If InstallVer is not discovered or set as a parameter, use the DefaultInstaller value either set on command line or is hard-coded in script.
 		if ( -not ($VerDiscAddr -eq $null) ) {
-			$global:InstallVer = (Resolve-DnsName -Type txt -name $global:VerDiscAddr -ErrorAction SilentlyContinue).Strings
+			$InstallVer = (Resolve-DnsName -Type txt -name $global:VerDiscAddr -ErrorAction SilentlyContinue).Strings
 		}
 		if ($InstallVer -eq $null) { 
 			if ($Debug) { Write-Output "InstallVer was null, so using DefaultInstallVer value, if present from command line" }
-			$global:InstallVer = $DefaultInstallVer
+			$InstallVer = $DefaultInstallVer
 		}
 		
 		if ($DownloadSource -eq $null) { 
@@ -629,12 +640,12 @@ function installAgent {
 		} else {
 			if ($Debug) {  Write-Output "Using local source file because the -Local flag parameter was used..." }
 		}
-
+		
 		# Install Wazuh Agent and then remove the installer file
 		if ($Debug) {  Write-Output "Installing Wazuh Agent" }
-		Start-Process -FilePath wazuh-agent.msi -ArgumentList "/q" -Wait -WindowStyle 'Hidden'
+		Start-Process -FilePath .\wazuh-agent.msi -ArgumentList "/q" -Wait -WindowStyle 'Hidden'
 		if ( -not ($Local) ) {
-			rm .\wazuh-agent.msi
+			Remove-Item -Path .\wazuh-agent.msi -erroraction silentlycontinue
 		}
 	
 		# Create ossec-agent\scripts and write the merge-wazuh-conf.ps1 file to it, and write bnc_wpk_root.pem file
@@ -789,6 +800,7 @@ $MgrAdd
 	}
 
 	if ($Debug) { Write-Output "This agent has successfully connected to the Wazuh manager!" }
+ 	Write-EventLog -LogName "Application" -Source "Wazuh-Modular" -EventID 10994 -EntryType Information -Message "siem-agent-deploy.ps1: Deployed Wazuh agent using script version $DEPLOY_VERSION" -Category 0
 	if ( $Debug -and ( -not ( $SkipSysmon  ) ) ) { Write-Output "Sysmon should be automatically provisioned/reprovisioned in an hour or less as needed." }
 	if ( $Debug -and ( -not ( $SkipOsquery ) ) ) { Write-Output "Osquery should be automatically provisioned/reprovisioned in an hour or less as needed." }
 		$global:result = "0"
@@ -798,6 +810,8 @@ $MgrAdd
 #
 # Main
 #
+
+$DEPLOY_VERSION=10
 
 If ( $Help -eq $true ) {
 	show_usage
@@ -832,6 +846,8 @@ if ( $CheckOnly -and $Install ) {
 	exit 2
 }
 
+Remove-Item -Path C:\Windows\System32\wazuh-agent.msi -erroraction silentlycontinue
+
 # If "-Local" option selected, confirm the agent-deploy.zip is present, unzip it, and confirm all required files were extracted from it.
 if ($Local) {
 	if ( -not (Test-Path -LiteralPath "agent-deploy.zip") ) {
@@ -848,8 +864,8 @@ if ($Local) {
 	if ( -not (Test-Path -LiteralPath "C:\Program Files\PackageManagement\ProviderAssemblies" -PathType Container ) ) {
 		New-Item -ItemType "directory" -Path "C:\Program Files\PackageManagement\ProviderAssemblies"
 	}
-	Microsoft.PowerShell.Archive\Expand-Archive "nuget.zip" -DestinationPath "C:\Program Files\PackageManagement\ProviderAssemblies\"
-	Import-PackageProvider -Name NuGet
+	Microsoft.PowerShell.Archive\Expand-Archive "nuget.zip" -DestinationPath "C:\Program Files\PackageManagement\ProviderAssemblies\" -erroraction silentlycontinue | Out-null
+	Import-PackageProvider -Name NuGet 
 	if ( -not (Test-Path -LiteralPath "wazuh-agent.msi") ) {
 		if ($Debug) { Write-Output "Option '-Local' specified but no 'wazuh-agent.msi' file was found in current directory.  Giving up and aborting the installation..." }
 		$global:result = "2"
