@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #
-# Amazon Linux 2 install and self-register of Wazuh GTIS SIEM agent
+# Amazon Linux 2023 install and self-register of Wazuh GTIS SIEM agent
 #
 
 # Dynamic named parameters
@@ -20,7 +20,9 @@ while [ $# -gt 0 ]; do
 done
 ## End Dyamic named parameters
 
-INSTANCE_ID=`curl -s http://169.254.169.254/latest/meta-data/instance-id`
+TOKEN=$(curl -XPUT -H "X-aws-ec2-metadata-token-ttl-seconds: 60" -s http://169.254.169.254/latest/api/token)
+INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
+LABEL_AVAILABILITY_ZONE=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/availability-zone)
 LABEL_ENV=$environment
 LABEL_APP=$app_name
 WAZ_AGENT_NAME="$LABEL_APP-$LABEL_ENV-$INSTANCE_ID"
@@ -59,6 +61,7 @@ echo "
     <label key=\"instance-id\">$INSTANCE_ID</label>
     <label key=\"env\">$LABEL_ENV</label>
     <label key=\"app\">$LABEL_APP</label>
+    <label key=\"availability-zone\">$LABEL_AVAILABILITY_ZONE</label>
   </labels>
   <logging>
     <log_format>plain</log_format>
@@ -97,9 +100,23 @@ O7bM4haWNBQkxEU=
 " > /var/ossec/etc/bnc_wpk_root.pem
 chown root:wazuh /var/ossec/etc/bnc_wpk_root.pem
 
-# Meet Wazuh docker listener prereqs
+# Meet Wazuh docker listener prereqs in a Python virtual environment and adjust the main script to operate from it.
 yum -y install python3-pip
-/usr/bin/pip3 install docker urllib3 requests
+mkdir /venv
+cd /venv
+python3 -m venv docker-listener
+./docker-listener/bin/pip install urllib3 
+./docker-listener/bin/pip install docker
+sed -i 1d /var/ossec/wodles/docker/DockerListener
+sed -i '1i#!/venv/docker-listener/bin/python3' /var/ossec/wodles/docker/DockerListener
+
+# Install cron (cronie) and rsyslog, which are not included by default in Amazon Linux 2023
+yum -y install cronie 
+systemctl enable crond.service
+systemctl start crond.service
+yum -y install rsyslog 
+systemctl enable rsyslog.service
+systemctl start rsyslog.service
 
 # Set up daily log flushing via cron
 echo -e '#!/bin/bash\nsystemctl stop wazuh-agent; rm -rf /var/ossec/logs/*; systemctl start wazuh-agent' > /etc/cron.daily/flush-logs

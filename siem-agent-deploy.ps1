@@ -1,12 +1,14 @@
 #
 # siem-agent-deploy.ps1
-# Version 10.1
+# Version 10.3
 # Changes in this Version
 # -----------------------
-# Default Wazuh Version Change
-#
+# Added -UseBasicParsing to the Invoke-WebRequest commmand to avoid the new Microsoft interactive security prompt.
+#    CVE-2025-54100
+#    KB ID: 5074596
+# Set the default install version to 4.14.1 
 # -----------------------
-# last material change 11/8/2023
+# last material change 12/10/2025
 #
 # This script is for checking and/or installing the Wazuh agent on Windows systems.  It can directly install or uninstall it, conditionally 
 # install it, or simply check to see if installation/reinstallation is needed.  The Wazuh agent for Windows presently includes Wazuh agent 
@@ -91,7 +93,7 @@ param ( $Mgr,
 	$ExtraGroups, 
 	$global:VerDiscAddr,
 	$InstallVer,
-	$global:DefaultInstallVer = "4.5.4",
+	$global:DefaultInstallVer = "4.14.1",
 	$DownloadSource,
 	[switch]$SkipSysmon=$false, 
 	[switch]$SkipOsquery=$false,
@@ -627,7 +629,7 @@ function installAgent {
 			$success = $false;
 			do{
 				try{
-					Invoke-WebRequest -Uri $DownloadSource -OutFile wazuh-agent.msi
+					Invoke-WebRequest -UseBasicParsing -Uri $DownloadSource -OutFile wazuh-agent.msi
 					$success = $true
 				}
 				catch{
@@ -816,7 +818,7 @@ $MgrAdd
 # Main
 #
 
-$DEPLOY_VERSION=10
+$DEPLOY_VERSION=10.1
 
 If ( $Help -eq $true ) {
 	show_usage
